@@ -1,5 +1,5 @@
 # QWCModelTool
-Experimental tool for extracting models from Harry Potter: Quidditch World Cup. This tool can extract all mesh nodes located in an FPM file and convert their textures to PNG format. The output will be a 
+WIP tool for extracting models from Harry Potter: Quidditch World Cup. This tool can extract all mesh nodes located in an FPM file and convert their textures to PNG format. The output will be a 
 [glb](https://www.khronos.org/gltf/) file, but glTF can be output instead using the `--out` flag.
 
 ## Usage
