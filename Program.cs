@@ -19,7 +19,7 @@ namespace QWCModelTool
             name: "--out",
             description: "The output glb file name");
             var exportLmOption = new Option<bool>(
-            name: "--nolm",       
+            name: "--nolm",
             description: "Skip lightmap export",
             getDefaultValue: () => false);
             var lmAlphaOption = new Option<float>(

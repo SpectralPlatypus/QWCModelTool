@@ -1,15 +1,15 @@
-﻿using SixLabors.ImageSharp.Memory;
+﻿using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Memory;
 using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp;
 using System;
-using System.Buffers.Binary;
 using System.Buffers;
+using System.Buffers.Binary;
+using System.Data;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Data;
 #nullable enable
 
 namespace QWCModelTool
@@ -90,7 +90,7 @@ namespace QWCModelTool
             // By this point, we should either have palette + palletized image or image itself
             if (image is null && imageBlob != null && colorTable.Length != 0)
             {
-                if(!BuildImage(imageBlob.Memory.Span[12..], out image))
+                if (!BuildImage(imageBlob.Memory.Span[12..], out image))
                 {
                     image?.Dispose();
                     throw new InvalidDataException("Failed to build palletized image");
@@ -98,10 +98,10 @@ namespace QWCModelTool
             }
 
             imageBlob?.Dispose();
-            if(image is null)
+            if (image is null)
             {
                 throw new InvalidDataException("Failed to build image");
-            
+
             }
 
             return image;

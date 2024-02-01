@@ -10,6 +10,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -19,7 +20,7 @@ namespace QWCModelTool
 {
     struct BoundingBox
     {
-        public Vector4 minBox { get; set; } 
+        public Vector4 minBox { get; set; }
         public Vector4 maxBox { get; set; }
     }
     struct FPMHeader
@@ -34,7 +35,7 @@ namespace QWCModelTool
         public static FPMHeader Parse(Span<byte> data)
         {
             var magic = BinaryPrimitives.ReadUInt32LittleEndian(data[..4]);
-            var length = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(4,8));
+            var length = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(4, 8));
             var firstShape = BinaryPrimitives.ReadUInt32LittleEndian(data[12..]);
             return new FPMHeader(magic, length, firstShape);
         }
@@ -106,7 +107,7 @@ namespace QWCModelTool
         public static ShapeNode Parse(Span<byte> data) => new ShapeNode(
             box: MemoryMarshal.Cast<byte, BoundingBox>(data[..0x20])[0],
             dataOffset: BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(0x20, 4)),
-            textureIndex: BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x2C,2))
+            textureIndex: BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x2C, 2))
             );
 
     }
@@ -135,7 +136,7 @@ namespace QWCModelTool
 
         public long BlockSize() => (uint)VertexStride * vertexCount;
     }
-   
+
     #region SHAPE_DATA_TYPES 
     interface IShapeDataContainer : IDisposable
     {
@@ -147,7 +148,7 @@ namespace QWCModelTool
         (IVertexGeometry, IVertexMaterial) GetVertexGeometry();
     }
 
-    struct ShapeDataContainer<T>: IShapeDataContainer where T : struct,IShapeTrivialData
+    struct ShapeDataContainer<T> : IShapeDataContainer where T : struct, IShapeTrivialData
     {
         private IMemoryOwner<byte> vertexBuffer;
 
@@ -174,11 +175,11 @@ namespace QWCModelTool
 
     [StructLayout(LayoutKind.Sequential)]
     struct ShapeDataFullPadded : IShapeTrivialData
-    { 
-            public Vector3 vertexPos;
-            public Vector3 normal;
-            public Vector2 uv;
-            UInt32 padding;
+    {
+        public Vector3 vertexPos;
+        public Vector3 normal;
+        public Vector2 uv;
+        UInt32 padding;
 
         public (IVertexGeometry, IVertexMaterial) GetVertexGeometry()
         {
@@ -247,14 +248,14 @@ namespace QWCModelTool
         subNodeOffset: BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(0x24, 4))
         );
     }
-    
-    internal class FPMFile: IDisposable
+
+    internal class FPMFile : IDisposable
     {
         FPMHeader header;
         FPMDirectory rootDir;
         ShapeNode[][] shapeNodes;
         List<string> textures = new List<string>();
-        
+
         Stream _stream;
         string absPath;
 
@@ -262,7 +263,7 @@ namespace QWCModelTool
 
         public FPMFile(string filePath)
         {
-            if(!File.Exists(filePath))
+            if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException();
             }
@@ -307,7 +308,7 @@ namespace QWCModelTool
             }
 
             // Change this if you encounter any dir entry with multiple sub-nodes
-            for (int i  = 0;  i < nodes.Count; i++)
+            for (int i = 0; i < nodes.Count; i++)
             {
                 _stream.Position = nodes[i].SubNodeOffset;
                 var shape = ParseShapeNode();
@@ -364,7 +365,7 @@ namespace QWCModelTool
                 foreach (var shape in node)
                 {
                     // Lightmap shapes
-                    if (materialBuilder[shape.TextureIndex] == default) 
+                    if (materialBuilder[shape.TextureIndex] == default)
                         continue;
 
                     _stream.Position = shape.DataOffset;
@@ -374,42 +375,75 @@ namespace QWCModelTool
 
                     // Round to the nearest address
                     _stream.Position = (_stream.Position + 15) & ~15;
-
-                    var mesh = new MeshBuilder<VertexPositionNormal, VertexTexture1>("mesh");
-                    var prim = mesh.UsePrimitive(materialBuilder[shape.TextureIndex]);
-
                     using var shapeData = CreateDataContainer(header);
 
                     _stream.Position = (_stream.Position + 15) & ~15;
-
                     var triBuffer = ParseTriStrips(header);
-                    for (int i = 0; i < triBuffer.Length - 2; ++i)
-                    {
-                        if (i % 2 != 0)
-                        {
-                            var A = shapeData.GetVertexGeometry(triBuffer[i + 2]);
-                            var B = shapeData.GetVertexGeometry(triBuffer[i + 1]);
-                            var C = shapeData.GetVertexGeometry(triBuffer[i]);
+                    var matl = materialBuilder[shape.TextureIndex];
 
-                            prim.AddTriangle((new VertexPositionNormal(A.Item1), new VertexTexture1(A.Item2)),
-                                (new VertexPositionNormal(B.Item1), new VertexTexture1(B.Item2)),
-                                (new VertexPositionNormal(C.Item1), new VertexTexture1(C.Item2)));
-                        }
-                        else
-                        {
-                            var A = shapeData.GetVertexGeometry(triBuffer[i]);
-                            var B = shapeData.GetVertexGeometry(triBuffer[i + 1]);
-                            var C = shapeData.GetVertexGeometry(triBuffer[i + 2]);
-                            prim.AddTriangle((new VertexPositionNormal(A.Item1), new VertexTexture1(A.Item2)),
-                                (new VertexPositionNormal(B.Item1), new VertexTexture1(B.Item2)),
-                                (new VertexPositionNormal(C.Item1), new VertexTexture1(C.Item2)));
-                        }
+                    Mesh m;
+                    if (header.VertexStride < 0x20)
+                    {
+                        m = CreateMesh<VertexPosition, VertexTexture1>(shapeData, triBuffer, matl, model);
                     }
-                    var m = model.CreateMesh(mesh);
+                    else
+                    {
+                        m = CreateMesh<VertexPositionNormal, VertexTexture1>(shapeData, triBuffer, matl, model);
+                    }
+
                     cNode.CreateNode($"{materialBuilder[shape.TextureIndex].Name}").WithMesh(m);
                 }
             }
             model.Save(outputFile);
+        }
+
+        private Mesh CreateMesh<TvG, TvM>(IShapeDataContainer shapeData, ushort[] triBuffer, MaterialBuilder matl, ModelRoot model)
+            where TvG : struct, IVertexGeometry where TvM : struct, IVertexMaterial
+        {
+            var mesh = new MeshBuilder<TvG, TvM>("mesh");
+            var prim = mesh.UsePrimitive(matl);
+
+            int actualTrisCount = 0;
+            for (int i = 0; i < triBuffer.Length - 2; ++i)
+            {
+                var triSlice = triBuffer[i..(i + 3)];
+                // Skip block with non-distinct values
+                if (triSlice.Length != triSlice.Distinct().Count())
+                {
+                    continue;
+                }
+                actualTrisCount++;
+
+                List<(IVertexGeometry, IVertexMaterial)> geoms = new()
+                {
+                    shapeData.GetVertexGeometry(triBuffer[i]),
+                    shapeData.GetVertexGeometry(triBuffer[i + 1]),
+                    shapeData.GetVertexGeometry(triBuffer[i + 2])
+                };
+
+                if (i % 2 != 0)
+                {
+                    // Swap order
+                    (geoms[0], geoms[2]) = (geoms[2], geoms[0]);
+                }
+
+                List<(TvG, TvM)> vertexBuilders = new();
+                foreach (var geom in geoms)
+                {
+                    (TvG, TvM) val = new();
+                    val.Item1.SetPosition(geom.Item1.GetPosition());
+                    if (geom.Item1.TryGetNormal(out var normal))
+                    {
+                        val.Item1.SetNormal(normal);
+                    }
+                    val.Item2.SetTexCoord(0, geom.Item2.GetTexCoord(0));
+                    vertexBuilders.Add(val);
+                }
+
+                prim.AddTriangle(vertexBuilders[0], vertexBuilders[1], vertexBuilders[2]);
+            }
+
+            return model.CreateMesh(mesh);
         }
 
         private IShapeDataContainer CreateDataContainer(ShapeDataHeader header)
@@ -449,15 +483,15 @@ namespace QWCModelTool
             List<TextureInfo> textureInfos = new List<TextureInfo>((int)rootDir.TextureCount);
             Span<byte> buffer = stackalloc byte[12];
 
-            for (uint i = 0; i < rootDir.TextureCount; i++) 
+            for (uint i = 0; i < rootDir.TextureCount; i++)
             {
                 _stream.Read(buffer);
                 textureInfos.Add(TextureInfo.Parse(buffer));
             }
             // Separating these loops as I don't know if the unknown bytes will come in handy later
-            foreach(TextureInfo texInfo in textureInfos) 
+            foreach (TextureInfo texInfo in textureInfos)
             {
-                if(texInfo.textureOffset > _stream.Length)
+                if (texInfo.textureOffset > _stream.Length)
                 {
                     throw new InvalidDataException("Invalid texture offset");
                 }
@@ -484,12 +518,13 @@ namespace QWCModelTool
             Span<byte> buffer = stackalloc byte[0x30];
             _stream.Read(buffer);
 
-            var node =  NodeEntry.Parse(buffer);
-
+            var node = NodeEntry.Parse(buffer);
+            /*
             if (node.CountNode != 1)
             {
-             //   throw new InvalidDataException("Expected a single child node");
+                throw new InvalidDataException("Expected a single child node");
             }
+            */
 
             if (node.SubNodeOffset > _stream.Length)
             {
@@ -498,7 +533,7 @@ namespace QWCModelTool
 
             return node;
         }
-        
+
         private List<ShapeNode> ParseShapeNode()
         {
             Span<byte> buffer = stackalloc byte[ShapeNode.SIZE];
@@ -508,10 +543,10 @@ namespace QWCModelTool
             uint subNodeCount = BinaryPrimitives.ReadUInt32LittleEndian(subHeader[..4]);
             uint subNodeOffset = BinaryPrimitives.ReadUInt32LittleEndian(subHeader[8..]);
 
-            List <ShapeNode> nodeList = new((int)subNodeCount);
+            List<ShapeNode> nodeList = new((int)subNodeCount);
 
             _stream.Position = subNodeOffset;
-            for (int i = 0; i < subNodeCount; ++i) 
+            for (int i = 0; i < subNodeCount; ++i)
             {
                 _stream.Read(buffer);
                 nodeList.Add(ShapeNode.Parse(buffer));
@@ -537,7 +572,7 @@ namespace QWCModelTool
             // Convert Triangle Strips to Triangle Data
             using IMemoryOwner<byte> tempBuf = MemoryAllocator.Default.Allocate<byte>(header.FaceCount * sizeof(UInt16));
             _stream.Read(tempBuf.Memory.Span);
-            ReadOnlySpan<ushort> triBuffer = MemoryMarshal.Cast<byte,ushort>(tempBuf.Memory.Span);
+            ReadOnlySpan<ushort> triBuffer = MemoryMarshal.Cast<byte, ushort>(tempBuf.Memory.Span);
 
             ushort[] tris = triBuffer.ToArray();
             return tris;
